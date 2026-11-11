@@ -2,6 +2,15 @@
 name = "mus-cli"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
+description = "A polished terminal UI for yt-dlp: download music and video, search, and manage a queue"
+license = "MIT"
+authors = ["TheWafool"]
+repository = "https://github.com/TheWafool/mus-cli"
+homepage = "https://github.com/TheWafool/mus-cli"
+readme = "README.md"
+keywords = ["yt-dlp", "tui", "music", "youtube", "downloader"]
+categories = ["command-line-utilities", "multimedia"]
 
 [dependencies]
 dirs = "7.0.0"
@@ -10,3 +19,8 @@ serde = { version = "1.0.229", features = ["derive"] }
 shlex = "2.0.1"
 toml = "1.2.1"
 unicode-width = "0.2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

@@ -5,7 +5,11 @@ use crate::input::TextInput;
 use crate::options::{field, Kind, F, FIELDS, QUICK};
 use crate::queue::{Job, Phase, Status};
 use crate::ytdlp::{self, AppEvent, JobEvent, SearchResult};
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
+use ratatui::layout::{Position, Rect};
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -35,6 +39,36 @@ impl Tab {
             Tab::Options => "Options",
         }
     }
+}
+
+/// Something on screen the mouse can hit. Recorded by the UI on each draw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    Tab(Tab),
+    UrlInput,
+    SearchInput,
+    /// Option row on the Download tab; `true` when the value part was hit.
+    Quick(usize, bool),
+    /// Option row on the Options tab (index into FIELDS).
+    Opt(usize, bool),
+    QueueRow(usize),
+    /// Search result; `true` when the select marker was hit.
+    SearchRow(usize, bool),
+    /// A clickable key hint: acts like pressing that key.
+    Key(KeyCode, KeyModifiers),
+    Preset(usize),
+    PopupKey(KeyCode),
+    PopupArea,
+    Scroll(ScrollArea),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollArea {
+    Quick,
+    Options,
+    Queue,
+    Search,
+    Presets,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +126,7 @@ pub struct App {
     pub version: Option<Result<String, String>>,
     pub should_quit: bool,
     pub started: Instant,
+    pub hits: RefCell<Vec<(Rect, Target)>>,
     tx: Sender<AppEvent>,
     next_id: u64,
 }
@@ -124,6 +159,7 @@ impl App {
             version: None,
             should_quit: false,
             started: Instant::now(),
+            hits: RefCell::new(Vec::new()),
             tx,
             next_id: 1,
         }
@@ -156,6 +192,14 @@ impl App {
     fn is_typing(&self) -> bool {
         (self.tab == Tab::Download && self.dl_focus == Focus::Input)
             || (self.tab == Tab::Search && self.search.focus == Focus::Input)
+    }
+
+    fn focused_input_empty(&self) -> bool {
+        match self.tab {
+            Tab::Download => self.url.value().is_empty(),
+            Tab::Search => self.search.input.value().is_empty(),
+            _ => false,
+        }
     }
 
     fn switch_tab(&mut self, dir: i32) {
@@ -387,11 +431,21 @@ impl App {
         }
         let (title, body) = (title.to_string(), body.to_string());
         std::thread::spawn(move || {
-            let _ = Command::new("notify-send")
-                .args(["-a", "mus", "-i", "folder-music", &title, &body])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+            let mut cmd = if cfg!(target_os = "macos") {
+                let script = format!(
+                    "display notification {:?} with title {:?}",
+                    body.replace('\n', " "),
+                    title
+                );
+                let mut c = Command::new("osascript");
+                c.args(["-e", &script]);
+                c
+            } else {
+                let mut c = Command::new("notify-send");
+                c.args(["-a", "mus", "-i", "folder-music", &title, &body]);
+                c
+            };
+            let _ = cmd.stdout(Stdio::null()).stderr(Stdio::null()).status();
         });
     }
 
@@ -401,13 +455,7 @@ impl App {
             self.toast(format!("Folder doesn't exist yet: {shown}"), Level::Warn);
             return;
         }
-        std::thread::spawn(move || {
-            let _ = Command::new("xdg-open")
-                .arg(path)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-        });
+        ytdlp::open_external(&path);
         self.toast(format!("Opening {shown}"), Level::Info);
     }
 
@@ -430,6 +478,108 @@ impl App {
             if let Some(h) = j.handle.take() {
                 let _ = h.join();
             }
+        }
+    }
+
+    // ---------- mouse ----------
+
+    fn key(&mut self, code: KeyCode) {
+        self.on_key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    pub fn on_mouse(&mut self, ev: MouseEvent) {
+        let pos = Position::new(ev.column, ev.row);
+        let hits = self.hits.borrow().clone();
+        let topmost = |want_scroll: bool| {
+            hits.iter()
+                .rev()
+                .find(|(r, t)| r.contains(pos) && matches!(t, Target::Scroll(_)) == want_scroll)
+                .map(|(_, t)| *t)
+        };
+        match ev.kind {
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                let up = ev.kind == MouseEventKind::ScrollUp;
+                let Some(Target::Scroll(area)) = topmost(true) else { return };
+                match area {
+                    ScrollArea::Quick => {
+                        if up && (self.dl_focus == Focus::Input || self.quick_sel == 0) {
+                            return;
+                        }
+                        self.dl_focus = Focus::List;
+                    }
+                    ScrollArea::Search => {
+                        if self.search.results.is_empty() || (up && self.search.sel == 0) {
+                            return;
+                        }
+                        self.search.focus = Focus::List;
+                    }
+                    _ => {}
+                }
+                self.key(if up { KeyCode::Up } else { KeyCode::Down });
+            }
+            MouseEventKind::Down(button @ (MouseButton::Left | MouseButton::Right)) => {
+                let right = button == MouseButton::Right;
+                let target = topmost(false);
+                if let Some(popup) = &self.popup {
+                    match (popup, target) {
+                        (Popup::Presets(cur), Some(Target::Preset(i))) => {
+                            if *cur == i {
+                                self.key(KeyCode::Enter);
+                            } else {
+                                self.popup = Some(Popup::Presets(i));
+                            }
+                        }
+                        (_, Some(Target::PopupKey(code))) => self.key(code),
+                        (Popup::Help, _) => self.popup = None,
+                        (_, Some(Target::PopupArea)) | (_, Some(Target::Preset(_))) => {}
+                        _ => self.popup = None, // click outside closes
+                    }
+                    return;
+                }
+                let Some(target) = target else { return };
+                let activate = KeyEvent::new(
+                    if right { KeyCode::Left } else { KeyCode::Enter },
+                    KeyModifiers::NONE,
+                );
+                match target {
+                    Target::Tab(t) => self.tab = t,
+                    Target::UrlInput => self.dl_focus = Focus::Input,
+                    Target::SearchInput => self.search.focus = Focus::Input,
+                    Target::Quick(i, on_value) => {
+                        let again = self.dl_focus == Focus::List && self.quick_sel == i;
+                        self.dl_focus = Focus::List;
+                        self.quick_sel = i;
+                        if (on_value || again || right)
+                            && let Some(id) = self.quick_fields().get(i).copied() {
+                                self.form_key(id, activate);
+                            }
+                    }
+                    Target::Opt(i, on_value) => {
+                        let again = self.opt_sel == i;
+                        self.opt_sel = i;
+                        if on_value || again || right {
+                            self.form_key(FIELDS[i].id, activate);
+                        }
+                    }
+                    Target::QueueRow(i) => {
+                        self.tab = Tab::Queue;
+                        self.queue_sel = i;
+                    }
+                    Target::SearchRow(i, on_marker) => {
+                        let s = &mut self.search;
+                        let again = s.focus == Focus::List && s.sel == i;
+                        s.focus = Focus::List;
+                        s.sel = i;
+                        if (on_marker || again || right)
+                            && !s.marked.remove(&i) {
+                                s.marked.insert(i);
+                            }
+                    }
+                    Target::Key(code, mods) => self.on_key(KeyEvent::new(code, mods)),
+                    _ => {}
+                }
+            }
+            _ => {}
         }
     }
 
@@ -466,6 +616,12 @@ impl App {
             KeyCode::Char('v') if ctrl => return self.paste_clipboard(),
             _ => {}
         }
+        // In an empty text field, 1-4 still switch tabs.
+        if self.is_typing() && !ctrl && !alt && self.focused_input_empty()
+            && let KeyCode::Char(c @ '1'..='4') = key.code {
+                self.tab = Tab::ALL[c as usize - '1' as usize];
+                return;
+            }
         if !self.is_typing() && !ctrl && !alt {
             match key.code {
                 KeyCode::Char('q') => return self.request_quit(),
@@ -561,7 +717,8 @@ impl App {
         if s.focus == Focus::Input {
             match key.code {
                 KeyCode::Enter => self.run_search(),
-                KeyCode::Esc | KeyCode::Down if !s.results.is_empty() => s.focus = Focus::List,
+                KeyCode::Esc => s.focus = Focus::List,
+                KeyCode::Down if !s.results.is_empty() => s.focus = Focus::List,
                 _ => {
                     s.input.handle_key(key);
                 }
@@ -600,17 +757,19 @@ impl App {
             KeyCode::Enter => self.queue_search_selection(),
             KeyCode::Char('o') => {
                 if let Some(r) = s.results.get(s.sel) {
-                    let url = r.url.clone();
-                    std::thread::spawn(move || {
-                        let _ = Command::new("xdg-open")
-                            .arg(url)
-                            .stdout(Stdio::null())
-                            .stderr(Stdio::null())
-                            .status();
-                    });
+                    ytdlp::open_external(&r.url);
                 }
             }
-            KeyCode::Char('i') | KeyCode::Char('/') | KeyCode::Esc => s.focus = Focus::Input,
+            KeyCode::Char('i') | KeyCode::Char('/') => s.focus = Focus::Input,
+            KeyCode::Char(c)
+                if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                    && c.is_alphanumeric() =>
+            {
+                // Typing a letter jumps back into the search box.
+                s.focus = Focus::Input;
+                s.input.clear();
+                s.input.insert(c);
+            }
             _ => {}
         }
     }

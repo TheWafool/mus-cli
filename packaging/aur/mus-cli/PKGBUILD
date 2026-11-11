@@ -1,0 +1,44 @@
+# Maintainer: TheWafool
+pkgname=mus-cli
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="A polished terminal UI for yt-dlp: download music and video, search, and manage a queue"
+arch=('x86_64' 'aarch64')
+url="https://github.com/TheWafool/mus-cli"
+license=('MIT')
+depends=('yt-dlp' 'ffmpeg' 'gcc-libs' 'glibc')
+makedepends=('cargo')
+optdepends=('deno: full YouTube support in yt-dlp'
+            'libnotify: desktop notifications'
+            'wl-clipboard: Ctrl+V paste on Wayland'
+            'xclip: Ctrl+V paste on X11'
+            'xdg-utils: open download folders')
+options=('!lto')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo test --frozen
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 target/release/mus-cli "$pkgdir/usr/bin/mus-cli"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

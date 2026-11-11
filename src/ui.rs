@@ -1,6 +1,7 @@
 //! Rendering.
 
-use crate::app::{App, Focus, Level, Popup, Tab};
+use crate::app::{App, Focus, Level, Popup, ScrollArea, Tab, Target};
+use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 use crate::config::{expand, Config, Mode, PRESETS};
 use crate::options::{field, Kind, F, FIELDS};
 use crate::queue::{Job, Phase, Status};
@@ -54,10 +55,54 @@ fn key_hint(key: &str, desc: &str) -> Vec<Span<'static>> {
     ]
 }
 
-fn hints(items: &[(&str, &str)]) -> Line<'static> {
+fn hit(app: &App, r: Rect, t: Target) {
+    app.hits.borrow_mut().push((r, t));
+}
+
+/// Record clickable rows of a rendered list. `heights[i]` is item i's height.
+fn hit_rows(app: &App, inner: Rect, offset: usize, heights: &[u16], mut f: impl FnMut(usize, Rect)) {
+    let mut y = inner.y;
+    for (i, h) in heights.iter().enumerate().skip(offset) {
+        if y >= inner.bottom() {
+            break;
+        }
+        let r = Rect { x: inner.x, y, width: inner.width, height: (*h).min(inner.bottom() - y) };
+        f(i, r);
+        y += h;
+    }
+    let _ = app;
+}
+
+/// The key a footer hint stands for, if it maps to exactly one key.
+fn key_for(label: &str) -> Option<(KeyCode, KeyModifiers)> {
+    let none = KeyModifiers::NONE;
+    Some(match label {
+        "enter" => (KeyCode::Enter, none),
+        "tab" => (KeyCode::Tab, none),
+        "space" => (KeyCode::Char(' '), none),
+        "esc" => (KeyCode::Esc, none),
+        "↓" => (KeyCode::Down, none),
+        "↑" => (KeyCode::Up, none),
+        "^C" => (KeyCode::Char('c'), KeyModifiers::CONTROL),
+        "^V" => (KeyCode::Char('v'), KeyModifiers::CONTROL),
+        l if l.chars().count() == 1 => (KeyCode::Char(l.chars().next()?), none),
+        _ => return None,
+    })
+}
+
+/// Footer key hints; each one is clickable.
+fn hints(app: &App, area: Rect, items: &[(&str, &str)]) -> Line<'static> {
     let mut spans = vec![Span::raw(" ")];
+    let mut x = area.x + 1;
     for (k, d) in items {
-        spans.extend(key_hint(k, d));
+        let pair = key_hint(k, d);
+        let w: u16 = pair.iter().map(|s| s.width() as u16).sum();
+        if let Some((code, mods)) = key_for(k) {
+            let r = Rect { x, y: area.y, width: w.saturating_sub(2), height: 1 }.intersection(area);
+            hit(app, r, Target::Key(code, mods));
+        }
+        x += w;
+        spans.extend(pair);
     }
     Line::from(spans)
 }
@@ -115,6 +160,7 @@ fn centered(area: Rect, w: u16, h: u16) -> Rect {
 }
 
 pub fn draw(f: &mut Frame, app: &App) {
+    app.hits.borrow_mut().clear();
     let [header, body, footer] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(5),
@@ -135,7 +181,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     match &app.popup {
         Some(Popup::Help) => draw_help(f, app),
         Some(Popup::Edit(_)) => draw_edit(f, app),
-        Some(Popup::Presets(i)) => draw_presets(f, *i),
+        Some(Popup::Presets(i)) => draw_presets(f, app, *i),
         Some(Popup::ConfirmQuit) => draw_confirm_quit(f, app),
         None => {}
     }
@@ -146,6 +192,7 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
         Span::styled(" ♪ mus ", Style::new().fg(BASE).bg(ACCENT).bold()),
         Span::raw("  "),
     ];
+    let mut x = area.x + left.iter().map(|s| s.width() as u16).sum::<u16>();
     for (i, tab) in Tab::ALL.iter().enumerate() {
         let mut label = format!(" {} {} ", i + 1, tab.title());
         if *tab == Tab::Queue {
@@ -159,6 +206,9 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
         } else {
             Style::new().fg(SUBTEXT)
         };
+        let w = label.width() as u16;
+        hit(app, Rect { x, y: area.y, width: w, height: 1 }.intersection(area), Target::Tab(*tab));
+        x += w + 1;
         left.push(Span::styled(label, style));
         left.push(Span::raw(" "));
     }
@@ -198,14 +248,14 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
         return;
     }
     let line = match app.tab {
-        Tab::Download if app.dl_focus == Focus::Input => hints(&[
+        Tab::Download if app.dl_focus == Focus::Input => hints(app, area, &[
             ("enter", "download"),
-            ("↓", "options"),
+            ("esc", "options"),
             ("^V", "paste"),
             ("tab", "next tab"),
             ("^C", "quit"),
         ]),
-        Tab::Download => hints(&[
+        Tab::Download => hints(app, area, &[
             ("↑↓", "move"),
             ("←→", "change"),
             ("enter", "edit"),
@@ -216,9 +266,9 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
             ("?", "help"),
         ]),
         Tab::Search if app.search.focus == Focus::Input => {
-            hints(&[("enter", "search"), ("↓", "results"), ("tab", "next tab"), ("^C", "quit")])
+            hints(app, area, &[("enter", "search"), ("esc", "leave field"), ("tab", "next tab"), ("^C", "quit")])
         }
-        Tab::Search => hints(&[
+        Tab::Search => hints(app, area, &[
             ("space", "select"),
             ("a", "all"),
             ("enter", "queue"),
@@ -226,7 +276,7 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
             ("/", "new search"),
             ("?", "help"),
         ]),
-        Tab::Queue => hints(&[
+        Tab::Queue => hints(app, area, &[
             ("c", "cancel"),
             ("r", "retry"),
             ("d", "remove"),
@@ -236,7 +286,7 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
             ("J/K", "reorder"),
             ("?", "help"),
         ]),
-        Tab::Options => hints(&[
+        Tab::Options => hints(app, area, &[
             ("↑↓", "move"),
             ("←→", "change"),
             ("enter", "edit"),
@@ -393,6 +443,7 @@ fn draw_download(f: &mut Frame, area: Rect, app: &App) {
     }
     let inner = block.inner(url_area);
     f.render_widget(block, url_area);
+    hit(app, url_area, Target::UrlInput);
     let prompt = Span::styled("› ", Style::new().fg(if focused { PINK } else { DIM }).bold());
     let text_w = inner.width.saturating_sub(2);
     if app.url.value().is_empty() {
@@ -443,7 +494,14 @@ fn draw_download(f: &mut Frame, area: Rect, app: &App) {
         .highlight_style(highlight())
         .highlight_symbol("▌ ")
         .highlight_spacing(ratatui::widgets::HighlightSpacing::Always);
+    let list_inner = panel("", false).inner(opts_area);
     f.render_stateful_widget(list, opts_area, &mut state);
+    hit(app, opts_area, Target::Scroll(ScrollArea::Quick));
+    hit_rows(app, list_inner, state.offset(), &vec![1; fields.len()], |i, r| {
+        hit(app, r, Target::Quick(i, false));
+        let vx = 2 + 16 + 2;
+        hit(app, Rect { x: r.x + vx, width: r.width.saturating_sub(vx), ..r }, Target::Quick(i, true));
+    });
 
     draw_download_info(f, info_area, app, list_focus.then(|| fields.get(sel).copied()).flatten());
     draw_activity(f, activity, app);
@@ -477,7 +535,13 @@ fn draw_activity(f: &mut Frame, area: Rect, app: &App) {
     let fit = (inner.height as usize / 3).max(1);
     let w = inner.width.saturating_sub(1);
     let items: Vec<ListItem> = order.iter().take(fit).map(|j| job_item(app, j, w)).collect();
-    f.render_widget(List::new(items), inner.inner(Margin { horizontal: 1, vertical: 0 }));
+    let rows = inner.inner(Margin { horizontal: 1, vertical: 0 });
+    f.render_widget(List::new(items), rows);
+    hit_rows(app, rows, 0, &vec![3; order.len().min(fit)], |i, r| {
+        if let Some(idx) = app.jobs.iter().position(|j| j.id == order[i].id) {
+            hit(app, r, Target::QueueRow(idx));
+        }
+    });
 }
 
 fn draw_download_info(f: &mut Frame, area: Rect, app: &App, field_id: Option<F>) {
@@ -565,6 +629,7 @@ fn draw_search(f: &mut Frame, area: Rect, app: &App) {
         );
     let inner = block.inner(input_area);
     f.render_widget(block, input_area);
+    hit(app, input_area, Target::SearchInput);
     let prompt = Span::styled("⌕ ", Style::new().fg(if focused { PINK } else { DIM }).bold());
     let text_w = inner.width.saturating_sub(2);
     if s.input.value().is_empty() {
@@ -678,7 +743,13 @@ fn draw_search(f: &mut Frame, area: Rect, app: &App) {
         .highlight_style(highlight())
         .highlight_symbol("▌")
         .highlight_spacing(ratatui::widgets::HighlightSpacing::Always);
+    let list_inner = panel("", false).inner(results_area);
     f.render_stateful_widget(list, results_area, &mut state);
+    hit(app, results_area, Target::Scroll(ScrollArea::Search));
+    hit_rows(app, list_inner, state.offset(), &vec![1; s.results.len()], |i, r| {
+        hit(app, r, Target::SearchRow(i, false));
+        hit(app, Rect { width: 3.min(r.width), ..r }, Target::SearchRow(i, true));
+    });
     scrollbar(f, results_area, s.results.len(), s.sel);
 }
 
@@ -903,7 +974,12 @@ fn draw_queue(f: &mut Frame, area: Rect, app: &App) {
         .highlight_style(highlight())
         .highlight_symbol("▌")
         .highlight_spacing(ratatui::widgets::HighlightSpacing::Always);
+    let list_inner = panel("", false).inner(list_area);
     f.render_stateful_widget(list, list_area, &mut state);
+    hit(app, list_area, Target::Scroll(ScrollArea::Queue));
+    hit_rows(app, list_inner, state.offset(), &vec![3; app.jobs.len()], |i, r| {
+        hit(app, r, Target::QueueRow(i));
+    });
 
     draw_job_detail(f, detail_area, &app.jobs[sel]);
 }
@@ -967,13 +1043,16 @@ fn draw_options(f: &mut Frame, area: Rect, app: &App) {
         .title(Line::from(" saved automatically ").right_aligned().fg(DIM));
     let inner_w = block.inner(list_area).width.saturating_sub(2);
     let mut items = Vec::new();
+    let mut row_field: Vec<Option<usize>> = Vec::new();
     let mut sel_row = 0;
     let mut last_section = "";
     for (i, def) in FIELDS.iter().enumerate() {
         if def.section != last_section {
             if !last_section.is_empty() {
                 items.push(ListItem::new(Line::default()));
+                row_field.push(None);
             }
+            row_field.push(None);
             items.push(ListItem::new(Line::from(Span::styled(
                 def.section.to_uppercase(),
                 Style::new().fg(PINK).bold(),
@@ -984,6 +1063,7 @@ fn draw_options(f: &mut Frame, area: Rect, app: &App) {
             sel_row = items.len();
         }
         items.push(option_row(&app.cfg, def.id, i == app.opt_sel, 24, inner_w));
+        row_field.push(Some(i));
     }
     let total_rows = items.len();
     let mut state = ListState::default().with_selected(Some(sel_row));
@@ -992,8 +1072,17 @@ fn draw_options(f: &mut Frame, area: Rect, app: &App) {
         .highlight_style(highlight())
         .highlight_symbol("▌ ")
         .highlight_spacing(ratatui::widgets::HighlightSpacing::Always);
+    let list_inner = panel("", false).inner(list_area);
     f.render_stateful_widget(list, list_area, &mut state);
     scrollbar(f, list_area, total_rows, sel_row);
+    hit(app, list_area, Target::Scroll(ScrollArea::Options));
+    hit_rows(app, list_inner, state.offset(), &vec![1; total_rows], |row, r| {
+        if let Some(i) = row_field[row] {
+            hit(app, r, Target::Opt(i, false));
+            let vx = 2 + 24 + 2;
+            hit(app, Rect { x: r.x + vx, width: r.width.saturating_sub(vx), ..r }, Target::Opt(i, true));
+        }
+    });
 
     // Side: help + preview
     let ph = preview_height(&app.cfg, "<URL>", side.width);
@@ -1074,6 +1163,12 @@ fn draw_help(f: &mut Frame, _app: &App) {
             ("p", "pause or resume the queue"),
             ("J / K", "move item down / up"),
         ]),
+        ("Mouse", &[
+            ("Click", "tabs, rows, fields, key hints"),
+            ("Click value / right-click", "change option forward / back"),
+            ("Wheel", "scroll lists"),
+            ("Shift+drag", "select text (terminal)"),
+        ]),
         ("Text fields", &[
             ("Ctrl+W, Ctrl+U", "delete word / to start"),
             ("Ctrl+←→, Home/End", "move by word / to ends"),
@@ -1094,13 +1189,14 @@ fn draw_help(f: &mut Frame, _app: &App) {
         }
         lines
     };
-    if f.area().width >= 124 {
+    if f.area().width >= 96 {
         let (a, b) = sections.split_at(3);
         let (left, mut right) = (render(a), render(b));
         right.push(Line::from(Span::styled("press any key to close", Style::new().fg(DIM))));
         let h = left.len().max(right.len()) as u16 + 3;
-        let area = centered(f.area(), 120, h);
+        let area = centered(f.area(), f.area().width.saturating_sub(4).min(124), h);
         f.render_widget(Clear, area);
+        hit(_app, area, Target::PopupArea);
         let block = popup_block("Keys");
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -1126,6 +1222,7 @@ fn draw_help(f: &mut Frame, _app: &App) {
     let h = lines.len() as u16 + 3;
     let area = centered(f.area(), 66, h);
     f.render_widget(Clear, area);
+    hit(_app, area, Target::PopupArea);
     f.render_widget(Paragraph::new(lines).block(popup_block("Keys")), area);
 }
 
@@ -1137,6 +1234,7 @@ fn draw_edit(f: &mut Frame, app: &App) {
     let help_rows = (def.help.width() as u16 / width.saturating_sub(6).max(1)) + 1;
     let area = centered(f.area(), width, 6 + help_rows + comp_rows);
     f.render_widget(Clear, area);
+    hit(app, area, Target::PopupArea);
     let block = popup_block(def.label).title_bottom(
         Line::from(if def.kind == Kind::Path {
             " enter save · esc cancel · tab complete "
@@ -1188,10 +1286,12 @@ fn draw_edit(f: &mut Frame, app: &App) {
     }
 }
 
-fn draw_presets(f: &mut Frame, sel: usize) {
+fn draw_presets(f: &mut Frame, app: &App, sel: usize) {
     let h = PRESETS.len() as u16 * 2 + 4;
     let area = centered(f.area(), 64, h);
     f.render_widget(Clear, area);
+    hit(app, area, Target::PopupArea);
+    hit(app, area, Target::Scroll(ScrollArea::Presets));
     let block = popup_block("Presets")
         .title_bottom(Line::from(" enter apply · esc close ").right_aligned().fg(DIM))
         .padding(Padding::new(1, 1, 1, 0));
@@ -1210,13 +1310,22 @@ fn draw_presets(f: &mut Frame, sel: usize) {
         .highlight_style(highlight())
         .highlight_symbol("▌ ")
         .highlight_spacing(ratatui::widgets::HighlightSpacing::Always);
+    let inner = popup_block("").padding(Padding::new(1, 1, 1, 0)).inner(area);
     f.render_stateful_widget(list, area, &mut state);
+    hit_rows(app, inner, state.offset(), &vec![2; PRESETS.len()], |i, r| {
+        hit(app, r, Target::Preset(i));
+    });
 }
 
 fn draw_confirm_quit(f: &mut Frame, app: &App) {
     let (a, p) = (app.active_count(), app.pending_count());
     let area = centered(f.area(), 52, 8);
     f.render_widget(Clear, area);
+    hit(app, area, Target::PopupArea);
+    // Buttons sit on the 4th text line (border + top padding + 3 lines).
+    let by = area.y + 2 + 3;
+    hit(app, Rect { x: area.x + 3, y: by, width: 9, height: 1 }, Target::PopupKey(KeyCode::Char('y')));
+    hit(app, Rect { x: area.x + 3 + 9, y: by, width: 15, height: 1 }, Target::PopupKey(KeyCode::Esc));
     let what = match (a, p) {
         (a, 0) => format!("{a} download(s) still running."),
         (0, p) => format!("{p} download(s) still waiting."),

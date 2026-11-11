@@ -7,7 +7,8 @@ mod ui;
 mod ytdlp;
 
 use ratatui::crossterm::event::{
-    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEventKind,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyEventKind, MouseEventKind,
 };
 use ratatui::crossterm::execute;
 use ratatui::DefaultTerminal;
@@ -49,9 +50,15 @@ fn main() -> io::Result<()> {
     }
 
     let mut terminal = ratatui::init();
-    let _ = execute!(io::stdout(), EnableBracketedPaste);
+    // Undo mouse capture / bracketed paste if we panic (ratatui's hook restores the rest).
+    let prev_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
+        prev_hook(info);
+    }));
+    let _ = execute!(io::stdout(), EnableBracketedPaste, EnableMouseCapture);
     let result = run(&mut terminal, &mut app, &rx);
-    let _ = execute!(io::stdout(), DisableBracketedPaste);
+    let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     app.shutdown();
     result
@@ -65,6 +72,9 @@ fn run(terminal: &mut DefaultTerminal, app: &mut app::App, rx: &Receiver<ytdlp::
                 match event::read()? {
                     Event::Key(k) if k.kind != KeyEventKind::Release => app.on_key(k),
                     Event::Paste(s) => app.on_paste(&s),
+                    Event::Mouse(m) if !matches!(m.kind, MouseEventKind::Moved | MouseEventKind::Drag(_)) => {
+                        app.on_mouse(m)
+                    }
                     _ => {}
                 }
                 if app.should_quit || !event::poll(Duration::ZERO)? {

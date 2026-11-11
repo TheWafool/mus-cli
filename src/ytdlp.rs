@@ -2,7 +2,6 @@
 
 use crate::config::*;
 use std::io::{BufRead, BufReader, Read};
-use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -366,12 +365,51 @@ fn spawn_reader<R: Read + Send + 'static>(
     })
 }
 
+/// Signal yt-dlp's whole process group (so ffmpeg children stop too).
+#[cfg(unix)]
 fn kill_group(pid: u32, signal: &str) {
     let _ = Command::new("kill")
         .args([signal, "--", &format!("-{pid}")])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+#[cfg(windows)]
+fn kill_group(pid: u32, _signal: &str) {
+    // /T kills the process tree (ffmpeg children included).
+    let _ = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+/// Put the child in its own process group on Unix.
+fn new_group(cmd: &mut Command) -> &mut Command {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    cmd
+}
+
+/// Open a file, folder or URL with the system default app.
+pub fn open_external(target: impl AsRef<std::ffi::OsStr>) {
+    let target = target.as_ref().to_os_string();
+    thread::spawn(move || {
+        let mut cmd = if cfg!(target_os = "macos") {
+            Command::new("open")
+        } else if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "start", ""]);
+            c
+        } else {
+            Command::new("xdg-open")
+        };
+        let _ = cmd.arg(target).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    });
 }
 
 /// Run one download in a background thread.
@@ -394,13 +432,12 @@ pub fn spawn_job(
         let send = |ev: JobEvent| {
             let _ = tx.send(AppEvent::Job(id, ev));
         };
-        let mut child = match Command::new(&bin)
+        let mut child = match new_group(&mut Command::new(&bin))
             .args(&args)
             .env("PYTHONUNBUFFERED", "1")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .process_group(0)
             .spawn()
         {
             Ok(c) => c,

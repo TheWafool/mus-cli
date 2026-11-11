@@ -158,7 +158,7 @@ pub const FIELDS: &[Field] = &[
     f(F::SearchCount, "App", "Search results", Choice,
       "How many results to fetch per search.", ""),
     f(F::Notify, "App", "Desktop notifications", Toggle,
-      "Send a notification (notify-send) when a download finishes or fails.", ""),
+      "Send a desktop notification when a download finishes or fails (notify-send on Linux).", ""),
     f(F::YtdlpPath, "App", "yt-dlp binary", Path,
       "Command or path used to run yt-dlp.", "yt-dlp"),
     f(F::ExtraArgs, "App", "Extra arguments", Text,
