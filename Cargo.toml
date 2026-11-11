@@ -24,3 +24,22 @@ unicode-width = "0.2"
 lto = true
 codegen-units = 1
 strip = true
+
+[package.metadata.deb]
+depends = "$auto, ffmpeg"
+recommends = "yt-dlp, libnotify-bin, xdg-utils, wl-clipboard | xclip"
+section = "sound"
+assets = [
+  ["target/release/mus-cli", "usr/bin/", "755"],
+  ["README.md", "usr/share/doc/mus-cli/", "644"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+  { source = "target/release/mus-cli", dest = "/usr/bin/mus-cli", mode = "755" },
+  { source = "LICENSE", dest = "/usr/share/licenses/mus-cli/LICENSE", mode = "644", doc = true },
+]
+[package.metadata.generate-rpm.requires]
+yt-dlp = "*"
+[package.metadata.generate-rpm.recommends]
+ffmpeg = "*"

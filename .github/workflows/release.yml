@@ -12,7 +12,7 @@ jobs:
         include:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
-          - { os: macos-13, target: x86_64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin }
           - { os: macos-latest, target: aarch64-apple-darwin }
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
     runs-on: ${{ matrix.os }}
@@ -29,8 +29,8 @@ jobs:
           name=mus-cli-${GITHUB_REF_NAME}-${{ matrix.target }}
           mkdir "$name"
           cp target/${{ matrix.target }}/release/mus-cli README.md LICENSE "$name"/
-          tar czf "$name.tar.gz" "$name"
-          echo "ASSET=$name.tar.gz" >> "$GITHUB_ENV"
+          mkdir dist
+          tar czf "dist/$name.tar.gz" "$name"
       - name: Package (windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -38,9 +38,15 @@ jobs:
           $name = "mus-cli-$env:GITHUB_REF_NAME-${{ matrix.target }}"
           New-Item -ItemType Directory $name | Out-Null
           Copy-Item target/${{ matrix.target }}/release/mus-cli.exe, README.md, LICENSE $name
-          Compress-Archive $name "$name.zip"
-          "ASSET=$name.zip" | Out-File -Append $env:GITHUB_ENV
+          New-Item -ItemType Directory dist | Out-Null
+          Compress-Archive $name "dist/$name.zip"
+      - name: Package (deb, rpm)
+        if: runner.os == 'Linux'
+        run: |
+          cargo install --locked cargo-deb cargo-generate-rpm
+          cargo deb --no-build --target ${{ matrix.target }} -o dist/
+          cargo generate-rpm --target ${{ matrix.target }} -o dist/
       - uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.ASSET }}
+          files: dist/*
           generate_release_notes: true
