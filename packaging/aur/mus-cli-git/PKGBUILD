@@ -7,10 +7,9 @@ pkgdesc="A polished terminal UI for yt-dlp: download music and video, search, an
 arch=('x86_64' 'aarch64')
 url="https://github.com/TheWafool/mus-cli"
 license=('MIT')
-depends=('yt-dlp' 'ffmpeg' 'gcc-libs' 'glibc')
+depends=('yt-dlp' 'ffmpeg' 'gcc-libs' 'glibc' 'deno')
 makedepends=('cargo' 'git')
-optdepends=('deno: full YouTube support in yt-dlp'
-            'libnotify: desktop notifications'
+optdepends=('libnotify: desktop notifications'
             'wl-clipboard: Ctrl+V paste on Wayland'
             'xclip: Ctrl+V paste on X11'
             'xdg-utils: open download folders')
