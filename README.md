@@ -11,14 +11,15 @@ A polished terminal UI for [yt-dlp](https://github.com/yt-dlp/yt-dlp). Paste lin
 
 mus needs **yt-dlp** and **ffmpeg** at runtime (see [Dependencies](#dependencies)).
 
-### Arch Linux (AUR)
+### Arch Linux
+
+AUR packages are coming soon. Until then, build the same package with `makepkg`:
 
 ```sh
-yay -S mus-cli        # latest release
-yay -S mus-cli-git    # latest commit
+git clone https://github.com/TheWafool/mus-cli
+cd mus-cli/packaging/aur/mus-cli      # or mus-cli-git for the latest commit
+makepkg -si
 ```
-
-(or `paru -S …`, or manually: `git clone https://aur.archlinux.org/mus-cli.git && cd mus-cli && makepkg -si`)
 
 ### Prebuilt binaries (Linux, macOS, Windows)
 
