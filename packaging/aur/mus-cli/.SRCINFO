@@ -18,6 +18,6 @@ pkgbase = mus-cli
 	optdepends = xdg-utils: open download folders
 	options = !lto
 	source = mus-cli-0.1.0.tar.gz::https://github.com/TheWafool/mus-cli/archive/refs/tags/v0.1.0.tar.gz
-	sha256sums = SKIP
+	sha256sums = d38b5fc95bb04f0b65f5927b407146b48af27433b6c76efa84250fa9ef401acd
 
 pkgname = mus-cli
