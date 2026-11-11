@@ -14,7 +14,7 @@ optdepends=('libnotify: desktop notifications'
             'xdg-utils: open download folders')
 options=('!lto')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('d38b5fc95bb04f0b65f5927b407146b48af27433b6c76efa84250fa9ef401acd')
+sha256sums=('c2de756f3559f1508daaac700ef6c4b2a5801145fd13c0573fb3fb75ced8bdaa')
 
 prepare() {
   cd "$pkgname-$pkgver"

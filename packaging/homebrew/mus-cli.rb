@@ -1,8 +1,8 @@
 class MusCli < Formula
   desc "Polished terminal UI for yt-dlp: download music and video, search, manage a queue"
   homepage "https://github.com/TheWafool/mus-cli"
-  url "https://github.com/TheWafool/mus-cli/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "d38b5fc95bb04f0b65f5927b407146b48af27433b6c76efa84250fa9ef401acd"
+  url "https://github.com/TheWafool/mus-cli/archive/refs/tags/v0.1.1.tar.gz"
+  sha256 "c2de756f3559f1508daaac700ef6c4b2a5801145fd13c0573fb3fb75ced8bdaa"
   license "MIT"
   head "https://github.com/TheWafool/mus-cli.git", branch: "main"
 
