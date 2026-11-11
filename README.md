@@ -21,6 +21,23 @@ cd mus-cli/packaging/aur/mus-cli      # or mus-cli-git for the latest commit
 makepkg -si
 ```
 
+### Homebrew (macOS, Linux)
+
+```sh
+brew install TheWafool/tap/mus-cli
+```
+
+Installs yt-dlp, ffmpeg and deno too.
+
+### Debian / Ubuntu, Fedora / openSUSE
+
+Download the `.deb` or `.rpm` from [Releases](https://github.com/TheWafool/mus-cli/releases) (from v0.1.1), then:
+
+```sh
+sudo apt install ./mus-cli_*_amd64.deb      # Debian / Ubuntu
+sudo dnf install ./mus-cli-*.x86_64.rpm     # Fedora (zypper install on openSUSE)
+```
+
 ### Prebuilt binaries (Linux, macOS, Windows)
 
 Download the archive for your platform from [Releases](https://github.com/TheWafool/mus-cli/releases), extract it, and put `mus-cli` (or `mus-cli.exe`) somewhere on your `PATH`:
