@@ -1,6 +1,6 @@
 # Maintainer: TheWafool
 pkgname=mus-cli
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="A polished terminal UI for yt-dlp: download music and video, search, and manage a queue"
 arch=('x86_64' 'aarch64')

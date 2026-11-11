@@ -1,6 +1,6 @@
 [package]
 name = "mus-cli"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.88"
 description = "A polished terminal UI for yt-dlp: download music and video, search, and manage a queue"
