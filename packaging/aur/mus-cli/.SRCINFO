@@ -1,0 +1,23 @@
+pkgbase = mus-cli
+	pkgdesc = A polished terminal UI for yt-dlp: download music and video, search, and manage a queue
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/TheWafool/mus-cli
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = cargo
+	depends = yt-dlp
+	depends = ffmpeg
+	depends = gcc-libs
+	depends = glibc
+	optdepends = deno: full YouTube support in yt-dlp
+	optdepends = libnotify: desktop notifications
+	optdepends = wl-clipboard: Ctrl+V paste on Wayland
+	optdepends = xclip: Ctrl+V paste on X11
+	optdepends = xdg-utils: open download folders
+	options = !lto
+	source = mus-cli-0.1.0.tar.gz::https://github.com/TheWafool/mus-cli/archive/refs/tags/v0.1.0.tar.gz
+	sha256sums = SKIP
+
+pkgname = mus-cli
