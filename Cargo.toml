@@ -4,3 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+dirs = "7.0.0"
+ratatui = "0.29"
+serde = { version = "1.0.229", features = ["derive"] }
+shlex = "2.0.1"
+toml = "1.2.1"
+unicode-width = "0.2"
